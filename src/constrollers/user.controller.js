@@ -4,6 +4,7 @@ import { User } from "../models/user.models.js";
 import { uploadFile } from "../utils/cloudinary.js";
 import { ApiRespones } from "../utils/ApiRespones.js";
 import jwt from "jsonwebtoken"
+import mongoose from "mongoose";
 
 
 
@@ -361,7 +362,7 @@ const getUserProfile = asyncHandler(async (req, res) => {
         email: 1,
         subscribersCout: 1,
         channelsSubscribeToCount: 1,
-        isSubscribed:1,
+        isSubscribed: 1,
         coverImage: 1,
         avatar: 1
 
@@ -374,9 +375,63 @@ const getUserProfile = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Channel does not exist")
   }
   return res
-  .status(200)
-  .json(
-    new ApiRespones(200, channel[0], "User channel fetched."))
+    .status(200)
+    .json(
+      new ApiRespones(200, channel[0], "User channel fetched."))
+})
+
+const getWatchHistory = asyncHandler(async (req, res) => {
+
+  const user = await User.aggregate([
+    {
+      $match: {
+        _id: new mongoose.Types.ObjectId(req.user._id)
+      }
+    },
+    {
+      $lookup: {
+        from: "videos",
+        localField: "watchHistory",
+        foreignField: "_id",
+        as: "watchHistory",
+        pipeline: [
+          {
+            $lookup: {
+              from: "users",
+              localField: "owner",
+              foreignField: "_id",
+              as: "owner",
+              pipeline: [
+                {
+                  $project: {
+                    fullname: 1,
+                    username: 1,
+                    avatar: 1,
+                  }
+                }
+              ]
+            }
+          },
+          {
+            $addFields: {
+              owner: {
+                $first: "$owner"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ])
+
+  return res
+    .status(200)
+    .json(
+      new ApiRespones(
+        200, user[0].watchHistory,
+        "User histoty fatched successfully"
+      )
+    )
 })
 export {
   resisterUser,
@@ -388,5 +443,6 @@ export {
   updateAccountDetails,
   updateUserAvatar,
   updateCoverImage,
-  getUserProfile
+  getUserProfile,
+  getWatchHistory
 };
