@@ -126,7 +126,7 @@ const loginUser = asyncHandler(async (req, res) => {
       new ApiRespones(
         200,
         {
-          user: loggedInUser, accessToken, refreshToken
+          user: loggedInUser
         },
         "User Logged In Successfully"
       )
@@ -137,8 +137,8 @@ const logoutUser = asyncHandler(async (req, res) => {
   await User.findByIdAndUpdate(
     req.user._id,
     {
-      $set: {
-        refreshToken: undefined
+      $unset: {
+        refreshToken: 1
       }
     }, {
     new: true
@@ -201,22 +201,30 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 })
 
 const changeCurrentPassword = asyncHandler(async (req, res) => {
-  const { oldPassword, newPassword } = req.body
-  const user = await User.findById(req.user?._id)
-  const isPasswordCorrect = await User.isPasswordCorrect(oldPassword)
+  console.log("REQ BODY 👉", req.body);
 
-  if (!isPasswordCorrect) {
-    throw new ApiError(400, "Invalid Old Password")
+  const { oldPassword, newPassword } = req.body || {};
+
+  if (!oldPassword || !newPassword) {
+    throw new ApiError(400, "Old password and new password are required");
   }
-  user.password = newPassword
 
-  await user.save(validateBeforeSave.false)
+  const user = await User.findById(req.user._id).select("+password");
 
-  return res
-    .status(200)
-    .json(new ApiRespones(200, {},
-      "Password change Successfully"))
-})
+  const isPasswordValid = await user.isPasswordCorrect(oldPassword);
+
+  if (!isPasswordValid) {
+    throw new ApiError(400, "Old password is incorrect");
+  }
+
+  user.password = newPassword;
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: "Password changed successfully"
+  });
+});
 
 const getCurrentUser = asyncHandler(async (req, res) => {
   return res
@@ -317,58 +325,58 @@ const getUserProfile = asyncHandler(async (req, res) => {
   }
 
   const channel = await User.aggregate([
-    {
-      $match: {
-        username: username?.toLowerCase()
-      }
-    },
-    {
-      $lookup: {
-        from: "subscriptions",
-        localField: "_id",
-        foreignField: "channel",
-        as: "subscribers"
-      }
-    },
-    {
-      $lookup: {
-        from: "subscriptions",
-        localField: "_id",
-        foreignField: "subscriber",
-        as: "subscribedTo"
-      }
-    },
-    {
-      $addFields: {
-        subscribersCount: {
-          $size: "$subscribers"
-        },
-        channelsSubscribeToCount: {
-          $size: "$subscribedTo"
-        },
-        isSubscribed: {
-          $cond: {
-            $in: [req.user?._id, "$subscribers.subscriber"],
-            then: true,
-            else: false
-          }
+  {
+    $match: {
+      username: username?.toLowerCase()
+    }
+  },
+  {
+    $lookup: {
+      from: "subscriptions",
+      localField: "_id",
+      foreignField: "channel",
+      as: "subscribers"
+    }
+  },
+  {
+    $lookup: {
+      from: "subscriptions",
+      localField: "_id",
+      foreignField: "subscriber",
+      as: "subscribedTo"
+    }
+  },
+  {
+    $addFields: {
+      subscribersCount: {
+        $size: "$subscribers"
+      },
+      channelsSubscribeToCount: {
+        $size: "$subscribedTo"
+      },
+      isSubscribed: {
+        $cond: {
+          if: { $in: [req.user._id, "$subscribers.subscriber"] },
+          then: true,
+          else: false
         }
       }
-    },
-    {
-      $project: {
-        fullname: 1,
-        username: 1,
-        email: 1,
-        subscribersCout: 1,
-        channelsSubscribeToCount: 1,
-        isSubscribed: 1,
-        coverImage: 1,
-        avatar: 1
-
-      }
     }
-  ])
+  },
+  {
+    $project: {
+      fullname: 1,
+      username: 1,
+      email: 1,
+      subscribersCount: 1,
+      channelsSubscribeToCount: 1,
+      isSubscribed: 1,
+      coverImage: 1,
+      avatar: 1
+    }
+  }
+]);
+
   console.log(channel)
 
   if (!channel?.length) {
